@@ -43,12 +43,34 @@ static double bench_strcasecmp(char **as, char **bs)
 	return now_ms() - start;
 }
 
-/* comparaison ASCII insensible a la casse, octet par octet, sans SIMD.
+/* version naive : meme logique que la partie ASCII de strings.EqualFold en Go.
+ * Le if tr == sr depend de la casse de chaque lettre : avec une casse
+ * aleatoire, le processeur se trompe de branchement une fois sur deux. */
+static inline int equal_fold_naive(const char *a, const char *b)
+{
+	for (;; a++, b++) {
+		unsigned char sr = *a, tr = *b;
+		if (tr == sr) {
+			if (sr == '\0')
+				return 1;
+			continue;
+		}
+		if (tr < sr) {
+			unsigned char t = tr;
+			tr = sr;
+			sr = t;
+		}
+		if (sr >= 'A' && sr <= 'Z' && tr == sr + 'a' - 'A')
+			continue;
+		return 0;
+	}
+}
+
+/* version sans branchement sur la casse.
  * En ASCII, une majuscule et sa minuscule ne different que par le bit 0x20.
- * La minuscule est calculee sans branchement : (c - 'A') < 26 vaut 0 ou 1,
- * decale de 5 bits il donne 0 ou 0x20. Aucun if ne depend de la casse,
- * donc aucune erreur de prediction de branchement. */
-static inline int ascii_equal_fold(const char *a, const char *b)
+ * (c - 'A') < 26 vaut 0 ou 1, decale de 5 bits il donne 0 ou 0x20 : on met
+ * la lettre en minuscule par arithmetique, sans if qui depende de la casse. */
+static inline int equal_fold_branchless(const char *a, const char *b)
 {
 	for (;; a++, b++) {
 		unsigned char ca = *a, cb = *b;
@@ -61,11 +83,19 @@ static inline int ascii_equal_fold(const char *a, const char *b)
 	}
 }
 
-static double bench_ascii(char **as, char **bs)
+static double bench_naive(char **as, char **bs)
 {
 	double start = now_ms();
 	for (int i = 0; i < N; i++)
-		sink = ascii_equal_fold(as[i], bs[i]);
+		sink = equal_fold_naive(as[i], bs[i]);
+	return now_ms() - start;
+}
+
+static double bench_branchless(char **as, char **bs)
+{
+	double start = now_ms();
+	for (int i = 0; i < N; i++)
+		sink = equal_fold_branchless(as[i], bs[i]);
 	return now_ms() - start;
 }
 
@@ -100,6 +130,7 @@ int main(void)
 
 	printf("C :\n");
 	show("strcasecmp(a, b)", bench_strcasecmp(as, bs));
-	show("ascii_equal_fold(a, b)", bench_ascii(as, bs));
+	show("equal_fold_naive(a, b)", bench_naive(as, bs));
+	show("equal_fold_branchless(a, b)", bench_branchless(as, bs));
 	return 0;
 }
